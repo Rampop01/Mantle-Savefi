@@ -1,0 +1,38 @@
+# Env
+.env
+.env.*
+!.env.example
+
+# Foundry / Solidity
+out/
+cache/
+broadcast/
+
+# Hardhat (if used)
+artifacts/
+cache-*      # e.g., cache-<solc>
+
+# Coverage
+coverage/
+lcov.info
+coverage-final.json
+
+# Node
+node_modules/
+
+# Typechain (if generated)
+typechain/
+typechain-types/
+
+# Misc tools
+.forge-snapshots/
+gas-snapshot-*.txt
+
+# Editor / OS
+.idea/
+.vscode/
+*.log
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
