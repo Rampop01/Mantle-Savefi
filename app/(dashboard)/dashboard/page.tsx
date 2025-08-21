@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { motion } from "framer-motion"
 import { ArrowUpRight, Clock, TrendingUp, Trophy, Wallet, ArrowRight, RefreshCw, ChevronRight } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -8,40 +8,85 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import Link from "next/link"
-import { useToast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
+import { ConnectButton } from "@/components/connect-button"
+import { useAccount, useContractRead } from "wagmi"
+import { CONTRACT_ADDRESSES } from "@/config/web3"
+import { abi as vaultAbi } from "@/hooks/abi/SaveFiVault"
+import { formatUnits } from "viem"
 
 export default function Dashboard() {
   const [progress, setProgress] = useState(0)
-  const [timeLeft, setTimeLeft] = useState({
-    days: 2,
-    hours: 14,
-    minutes: 35,
-    seconds: 22,
-  })
   const { toast } = useToast()
-  const isConnected = false
-  const address: string | undefined = undefined
-  // const [isConnected, setIsConnected] = useState(false) // Mock connection status
+  const { address, isConnected } = useAccount()
 
-  // Simulate countdown timer
+  // On-chain reads
+  const { data: tvl } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getTotalValueLocked',
+  } as any)
+  const { data: userStats } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getUserStats',
+    args: address ? [address as `0x${string}`] : undefined,
+    enabled: isConnected && !!address,
+  } as any)
+  const { data: drawHistory } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getDrawHistory',
+    args: [0, 3],
+  } as any)
+  const { data: prize } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getCurrentPrizePool',
+  } as any)
+  const { data: totalParticipants } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getTotalParticipants',
+  } as any)
+  const { data: totalYield } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getTotalYieldGenerated',
+  } as any)
+  const { data: apy } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getCurrentAPY',
+  } as any)
+  const { data: nextDrawTs } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'getNextDrawTime',
+  } as any)
+  const { data: userBal } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: 'balanceOf',
+    args: address ? [address as `0x${string}`] : undefined,
+    enabled: isConnected && !!address,
+  } as any)
+
+  // Countdown
+  const [remaining, setRemaining] = useState<number>(0)
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev.seconds > 0) {
-          return { ...prev, seconds: prev.seconds - 1 }
-        } else if (prev.minutes > 0) {
-          return { ...prev, minutes: prev.minutes - 1, seconds: 59 }
-        } else if (prev.hours > 0) {
-          return { ...prev, hours: prev.hours - 1, minutes: 59, seconds: 59 }
-        } else if (prev.days > 0) {
-          return { ...prev, days: prev.days - 1, hours: 23, minutes: 59, seconds: 59 }
-        }
-        return prev
-      })
+    const id = setInterval(() => {
+      const now = Math.floor(Date.now() / 1000)
+      const ts = Number(nextDrawTs ?? 0)
+      setRemaining(Math.max(0, ts - now))
     }, 1000)
-
-    return () => clearInterval(timer)
-  }, [])
+    return () => clearInterval(id)
+  }, [nextDrawTs])
+  const days = Math.floor(remaining / 86400)
+  const hours = Math.floor((remaining % 86400) / 3600)
+  const minutes = Math.floor((remaining % 3600) / 60)
+  const seconds = remaining % 60
+  // const [isConnected, setIsConnected] = useState(false) // Mock connection status
 
   // Simulate progress bar
   useEffect(() => {
@@ -82,22 +127,7 @@ export default function Dashboard() {
           <SidebarTrigger />
           <h1 className="text-xl font-bold">Dashboard</h1>
         </div>
-        <Button
-          className="bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-700 hover:to-cyan-600 text-white border-none"
-          onClick={() => {
-            if (!isConnected) {
-              // This would open the wallet modal in a real implementation
-              toast({
-                title: "Connect Wallet",
-                description: "Please connect your wallet from the landing page first.",
-                variant: "destructive",
-              })
-            }
-          }}
-        >
-          <Wallet className="mr-2 h-4 w-4" />
-          {isConnected ? `Connected: ${address?.slice(0, 6)}...${address?.slice(-4)}` : "Connect Wallet"}
-        </Button>
+        <ConnectButton />
       </header>
 
       {/* Main content */}
@@ -167,7 +197,7 @@ export default function Dashboard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold">0.00 USDC</div>
+                  <div className="text-3xl font-bold">{userBal ? `${Number(formatUnits(userBal as bigint, 6)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} USDC` : (isConnected ? '0.00 USDC' : 'Connect wallet')}</div>
                   <p className="text-sm text-gray-400">
                     {isConnected ? "Your deposits will appear here" : "Connect wallet to view your deposits"}
                   </p>
@@ -204,7 +234,7 @@ export default function Dashboard() {
               </Card>
             </div>
 
-            {/* Recent winners */}
+            {/* Recent winners (from draw history) */}
             <Card className="bg-white/5 border-purple-500/20 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -215,31 +245,30 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 flex items-center justify-center">
-                          <Trophy className="h-5 w-5 text-yellow-500" />
+                  {Array.isArray(drawHistory) && (drawHistory as any[]).length > 0 ? (
+                    (drawHistory as any[]).map((d: any, i: number) => (
+                      <div key={`${String(d.id)}-${i}`} className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 flex items-center justify-center">
+                            <Trophy className="h-5 w-5 text-yellow-500" />
+                          </div>
+                          <div>
+                            <div className="font-medium">{`${String(d.winner).slice(0,6)}...${String(d.winner).slice(-4)}`}</div>
+                            <div className="text-sm text-gray-400">Draw #{String(d.id)} • {new Date(Number(d.timestamp) * 1000).toLocaleDateString()}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-medium">0x7a...3f9{i}</div>
-                          <div className="text-sm text-gray-400">
-                            Draw #{42 - i} • {i} week{i > 1 ? "s" : ""} ago
+                        <div className="text-right">
+                          <div className="font-bold">{`${Number(formatUnits(d.prizeAmount as bigint, 6)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} USDC`}</div>
+                          <div className="text-sm text-cyan-400 flex items-center justify-end">
+                            View
+                            <ArrowUpRight className="ml-1 h-3 w-3" />
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-bold">{(150 / i).toFixed(2)} USDC</div>
-                        <div className="text-sm text-cyan-400 flex items-center justify-end">
-                          View
-                          <ArrowUpRight className="ml-1 h-3 w-3" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-400">No draws yet</div>
+                  )}
                 </div>
               </CardContent>
               <CardFooter>
@@ -259,35 +288,23 @@ export default function Dashboard() {
                   <Clock className="mr-2 h-5 w-5 text-purple-400" />
                   Next Draw
                 </CardTitle>
-                <CardDescription>Draw #43 is coming soon</CardDescription>
+                <CardDescription>Next draw countdown</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="mb-4">
                   <div className="text-sm text-gray-400 mb-1">Time Remaining</div>
                   <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="bg-white/10 rounded-lg p-2">
-                      <div className="text-2xl font-bold">{timeLeft.days}</div>
-                      <div className="text-xs text-gray-400">Days</div>
-                    </div>
-                    <div className="bg-white/10 rounded-lg p-2">
-                      <div className="text-2xl font-bold">{timeLeft.hours}</div>
-                      <div className="text-xs text-gray-400">Hours</div>
-                    </div>
-                    <div className="bg-white/10 rounded-lg p-2">
-                      <div className="text-2xl font-bold">{timeLeft.minutes}</div>
-                      <div className="text-xs text-gray-400">Mins</div>
-                    </div>
-                    <div className="bg-white/10 rounded-lg p-2">
-                      <div className="text-2xl font-bold">{timeLeft.seconds}</div>
-                      <div className="text-xs text-gray-400">Secs</div>
-                    </div>
+                    <div className="bg-white/10 rounded-lg p-2"><div className="text-2xl font-bold">{days}</div><div className="text-xs text-gray-400">Days</div></div>
+                    <div className="bg-white/10 rounded-lg p-2"><div className="text-2xl font-bold">{hours}</div><div className="text-xs text-gray-400">Hours</div></div>
+                    <div className="bg-white/10 rounded-lg p-2"><div className="text-2xl font-bold">{minutes}</div><div className="text-xs text-gray-400">Mins</div></div>
+                    <div className="bg-white/10 rounded-lg p-2"><div className="text-2xl font-bold">{seconds}</div><div className="text-xs text-gray-400">Secs</div></div>
                   </div>
                 </div>
 
                 <div className="mb-4">
                   <div className="flex justify-between mb-1">
                     <div className="text-sm text-gray-400">Prize Pool</div>
-                    <div className="text-sm font-medium">~325.75 USDC</div>
+                    <div className="text-sm font-medium">{prize ? `${Number(formatUnits(prize as bigint, 6)).toLocaleString()} USDC` : '—'}</div>
                   </div>
                   <Progress
                     value={progress}
@@ -299,11 +316,11 @@ export default function Dashboard() {
                 <div className="p-3 rounded-lg bg-white/10 mb-4">
                   <div className="flex justify-between mb-1">
                     <div className="text-sm">Total Deposits</div>
-                    <div className="text-sm font-medium">24,750 USDC</div>
+                    <div className="text-sm font-medium">{tvl ? `${Number(formatUnits(tvl as bigint, 6)).toLocaleString()} USDC` : '—'}</div>
                   </div>
                   <div className="flex justify-between">
                     <div className="text-sm">Your Deposits</div>
-                    <div className="text-sm font-medium">{isConnected ? "0.00 USDC" : "Connect wallet"}</div>
+                    <div className="text-sm font-medium">{userBal ? `${Number(formatUnits(userBal as bigint, 6)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} USDC` : (isConnected ? '0.00 USDC' : 'Connect wallet')}</div>
                   </div>
                 </div>
               </CardContent>
@@ -327,7 +344,7 @@ export default function Dashboard() {
               </CardFooter>
             </Card>
 
-            {/* Protocol stats */}
+            {/* Protocol stats (on-chain) */}
             <Card className="bg-white/5 border-purple-500/20 backdrop-blur-sm">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -340,32 +357,39 @@ export default function Dashboard() {
               <CardContent className="space-y-4">
                 <div className="flex justify-between">
                   <div className="text-sm text-gray-400">Total Value Locked</div>
-                  <div className="font-medium">$24,750.00</div>
+                  <div className="font-medium">{tvl ? `${Number(formatUnits(tvl as bigint, 6)).toLocaleString()} USDC` : '—'}</div>
                 </div>
                 <div className="flex justify-between">
                   <div className="text-sm text-gray-400">Total Prizes Awarded</div>
-                  <div className="font-medium">$12,345.67</div>
+                  <div className="font-medium">{totalYield ? `${Number(formatUnits(totalYield as bigint, 6)).toLocaleString()} USDC` : '—'}</div>
                 </div>
                 <div className="flex justify-between">
                   <div className="text-sm text-gray-400">Total Participants</div>
-                  <div className="font-medium">1,234</div>
+                  <div className="font-medium">{totalParticipants ? Number(totalParticipants as bigint).toLocaleString() : '—'}</div>
                 </div>
                 <div className="flex justify-between">
                   <div className="text-sm text-gray-400">Current APY</div>
-                  <div className="font-medium text-green-400">4.2%</div>
+                  <div className="font-medium text-green-400">{apy ? `${Number(apy as bigint)/100}%` : '—'}</div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Recent activity */}
+            {/* Recent activity (user stats when connected) */}
             <Card className="bg-white/5 border-purple-500/20 backdrop-blur-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Recent Activity</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="text-sm text-gray-400 text-center py-6">
-                  {isConnected ? "No recent activity" : "Connect your wallet to view your activity"}
-                </div>
+                {isConnected && userStats ? (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span>Total Deposited</span><span className="font-medium">{`${Number(formatUnits((userStats as any).totalDeposited as bigint, 6)).toLocaleString()} USDC`}</span></div>
+                    <div className="flex justify-between"><span>Total Winnings</span><span className="font-medium">{`${Number(formatUnits((userStats as any).totalWinnings as bigint, 6)).toLocaleString()} USDC`}</span></div>
+                    <div className="flex justify-between"><span>Draws Won</span><span className="font-medium">{`${Number((userStats as any).drawsWon)}`}</span></div>
+                    <div className="flex justify-between"><span>Last Deposit</span><span className="font-medium">{Number((userStats as any).lastDepositTime) > 0 ? new Date(Number((userStats as any).lastDepositTime) * 1000).toLocaleString() : '—'}</span></div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-400 text-center py-6">{isConnected ? 'No recent data' : 'Connect your wallet to view your activity'}</div>
+                )}
               </CardContent>
               <CardFooter>
                 <Button

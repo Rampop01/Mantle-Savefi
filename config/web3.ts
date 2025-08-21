@@ -1,21 +1,35 @@
 import { http } from 'wagmi'
-import { morphHolesky } from 'wagmi/chains'
 import { getDefaultConfig } from '@rainbow-me/rainbowkit'
+
+// Custom chain: Mantle Sepolia (chainId 5003)
+export const mantleSepolia = {
+  id: 5003,
+  name: 'Mantle Sepolia',
+  nativeCurrency: { name: 'Mantle', symbol: 'MNT', decimals: 18 },
+  rpcUrls: {
+    default: { http: ['https://rpc.sepolia.mantle.xyz'] },
+    public: { http: ['https://rpc.sepolia.mantle.xyz'] },
+  },
+  blockExplorers: {
+    default: { name: 'MantleScan', url: 'https://explorer.sepolia.mantle.xyz' },
+  },
+} as const
 
 export const config = getDefaultConfig({
   appName: 'SaveFi',
   projectId: '96aab5ed69f1740a6cb82d7c7a4203e5',
-  chains: [morphHolesky],
+  chains: [mantleSepolia],
   transports: {
-    [morphHolesky.id]: http(),
+    [mantleSepolia.id]: http('https://rpc.sepolia.mantle.xyz'),
   },
   ssr: true,
 })
 
 export const CONTRACT_ADDRESSES = {
-  SAVE_FI_VAULT: '0xF9095E37f0231Ff6B242602f0cf8AB2A01012C84',
-  AAVE_YIELD_STRATEGY: '0x26368A13d07002cc369eAeedd5D8bC4c90A1841C',
-  MOCK_RANDOMNESS_PROVIDER: '0xAa1deb4Cc3c3386D813E7f7b2fF52a7c4EFB675e',
-  SAVE_TOKEN: '0xFD6ADb6A498a6F9f4068DAc7f2271b5e988a13d0',
-  MOCK_USDC: '0x274f499201b0716e6CB632FF5BEc10cAD508eAD6'
+  SAVE_FI_VAULT: '0x896E731065Da2CBa4B289F769755630d0823AD46',
+  SAVE_TOKEN: '0x3Bd9369511B5efCfD693147B6c32d6cC04A03a33',
+  MOCK_USDC: '0x68310Ee20f3D4611DE39E40fE352692cf48168bA',
+  // Not used on Mantle Sepolia right now
+  AAVE_YIELD_STRATEGY: '0x0000000000000000000000000000000000000000',
+  MOCK_RANDOMNESS_PROVIDER: '0x0000000000000000000000000000000000000000',
 }

@@ -6,55 +6,20 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { useContractRead } from "wagmi"
+import { CONTRACT_ADDRESSES } from "@/config/web3"
+import { abi as vaultAbi } from "@/hooks/abi/SaveFiVault"
+import { formatUnits } from "viem"
 
 export default function AllTimeLeaderboardPage() {
-  const allTimeStats = [
-    {
-      rank: 1,
-      address: "0x7a...3f91",
-      totalWinnings: "1,234.56",
-      drawsWon: 8,
-      totalDeposits: "15,000.00",
-      winRate: "19.0%",
-      status: "Legend",
-    },
-    {
-      rank: 2,
-      address: "0x3b...8e72",
-      totalWinnings: "987.43",
-      drawsWon: 6,
-      totalDeposits: "12,500.00",
-      winRate: "14.3%",
-      status: "Champion",
-    },
-    {
-      rank: 3,
-      address: "0x5f...2d45",
-      totalWinnings: "876.32",
-      drawsWon: 5,
-      totalDeposits: "11,200.00",
-      winRate: "11.9%",
-      status: "Champion",
-    },
-    {
-      rank: 4,
-      address: "0x9c...7a31",
-      totalWinnings: "654.21",
-      drawsWon: 4,
-      totalDeposits: "9,800.00",
-      winRate: "9.5%",
-      status: "Elite",
-    },
-    {
-      rank: 5,
-      address: "0x2d...4e67",
-      totalWinnings: "543.10",
-      drawsWon: 3,
-      totalDeposits: "8,500.00",
-      winRate: "7.1%",
-      status: "Elite",
-    },
-  ]
+  const { data, isLoading, isError } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: "getAllTimeLeaderboard",
+    args: [BigInt(25)],
+  } as any)
+
+  const entries = (data as any[] | undefined) ?? []
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -89,7 +54,7 @@ export default function AllTimeLeaderboardPage() {
               <CardTitle className="text-sm font-medium text-gray-400">Total Prizes Awarded</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">12,345.67 USDC</div>
+              <div className="text-2xl font-bold">— USDC</div>
               <div className="flex items-center text-sm text-green-400">
                 <TrendingUp className="h-4 w-4 mr-1" />
                 Across 42 draws
@@ -141,25 +106,50 @@ export default function AllTimeLeaderboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allTimeStats.map((user) => (
-                    <TableRow key={user.rank} className="hover:bg-white/5">
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          {user.rank === 1 && <Trophy className="h-4 w-4 text-yellow-500" />}
-                          {user.rank === 2 && <Award className="h-4 w-4 text-gray-400" />}
-                          {user.rank === 3 && <Award className="h-4 w-4 text-amber-600" />}#{user.rank}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono">{user.address}</TableCell>
-                      <TableCell>{getStatusBadge(user.status)}</TableCell>
-                      <TableCell className="font-medium text-cyan-400">{user.totalWinnings} USDC</TableCell>
-                      <TableCell>{user.drawsWon}</TableCell>
-                      <TableCell>
-                        <span className="text-green-400">{user.winRate}</span>
-                      </TableCell>
-                      <TableCell>{user.totalDeposits} USDC</TableCell>
+                  {isLoading && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-gray-400">Loading leaderboard…</TableCell>
                     </TableRow>
-                  ))}
+                  )}
+                  {isError && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-red-400">Failed to load leaderboard</TableCell>
+                    </TableRow>
+                  )}
+                  {!isLoading && !isError && entries.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-gray-400">No entries</TableCell>
+                    </TableRow>
+                  )}
+                  {!isLoading && !isError && entries.length > 0 && (entries as any[]).map((e: any, i: number) => {
+                    const rank = i + 1
+                    const addr = e.user as string
+                    const totalWinnings = Number(formatUnits(e.totalWinnings as bigint, 6)).toLocaleString()
+                    const drawsWon = Number(e.drawsWon)
+                    const totalDeposits = Number(formatUnits(e.totalDeposits as bigint, 6)).toLocaleString()
+                    const winRatePct = `${(Number(e.winRate) / 100).toFixed(1)}%`
+                    const status = rank === 1 ? 'Legend' : rank <= 3 ? 'Champion' : rank <= 10 ? 'Elite' : 'Player'
+                    const mono = `${addr.slice(0,6)}...${addr.slice(-4)}`
+                    return (
+                      <TableRow key={`${addr}-${rank}`} className="hover:bg-white/5">
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {rank === 1 && <Trophy className="h-4 w-4 text-yellow-500" />}
+                            {rank === 2 && <Award className="h-4 w-4 text-gray-400" />}
+                            {rank === 3 && <Award className="h-4 w-4 text-amber-600" />}#{rank}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono">{mono}</TableCell>
+                        <TableCell>{getStatusBadge(status)}</TableCell>
+                        <TableCell className="font-medium text-cyan-400">{totalWinnings} USDC</TableCell>
+                        <TableCell>{drawsWon}</TableCell>
+                        <TableCell>
+                          <span className="text-green-400">{winRatePct}</span>
+                        </TableCell>
+                        <TableCell>{totalDeposits} USDC</TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>

@@ -1,42 +1,43 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { Trophy, Medal, Award, Crown, Calendar } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { useContractRead } from "wagmi"
+import { CONTRACT_ADDRESSES } from "@/config/web3"
+import { abi as vaultAbi } from "@/hooks/abi/SaveFiVault"
+import { formatUnits } from "viem"
 
 export default function WeeklyLeaderboardPage() {
   const [selectedWeek, setSelectedWeek] = useState("current")
 
-  const weeklyWinners = [
-    {
-      rank: 1,
-      address: "0x7a...3f91",
-      prize: "150.25",
-      deposit: "2,500.00",
-      chance: "10.1%",
-      week: "Week 42",
-    },
-    {
-      rank: 2,
-      address: "0x3b...8e72",
-      prize: "142.18",
-      deposit: "2,200.00",
-      chance: "9.2%",
-      week: "Week 41",
-    },
-    {
-      rank: 3,
-      address: "0x5f...2d45",
-      prize: "138.92",
-      deposit: "2,100.00",
-      chance: "9.0%",
-      week: "Week 40",
-    },
-  ]
+  const weekOffset = useMemo(() => {
+    // current: 0, last: 1, numeric specific: treat as offset from current
+    if (selectedWeek === "current") return BigInt(0)
+    if (selectedWeek === "last") return BigInt(1)
+    const n = Number(selectedWeek)
+    return Number.isFinite(n) ? BigInt(n) : BigInt(0)
+  }, [selectedWeek])
+
+  const { data, isLoading, isError } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: "getWeeklyWinners",
+    args: [weekOffset],
+  } as any)
+
+  const weeklyWinners = ((data as any[] | undefined) ?? []).map((w: any, idx: number) => ({
+    rank: idx + 1,
+    address: w.winner as string,
+    prize: Number(formatUnits(w.prizeAmount as bigint, 6)).toLocaleString(),
+    deposit: Number(formatUnits(w.userDeposit as bigint, 6)).toLocaleString(),
+    chance: `${(Number(w.winningChance) / 100).toFixed(1)}%`,
+    week: `Draw #${String(w.drawId)}`,
+  }))
 
   const getRankIcon = (rank: number) => {
     switch (rank) {

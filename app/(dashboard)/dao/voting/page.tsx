@@ -8,33 +8,76 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
+import { useAccount, useContractReads } from "wagmi"
+import { useActiveProposals, useProposalCount, useUserVotingHistory, useVotingPower, useCastVote, useDelegate } from "@/hooks/use-governance"
+import { CONTRACT_ADDRESSES } from "@/config/web3"
+import { abi as saveTokenAbi } from "@/hooks/abi/SaveToken"
+import { formatUnits } from "viem"
+import { useToast } from "@/hooks/use-toast"
+import { Input } from "@/components/ui/input"
+import { useState } from "react"
 
 export default function VotingPage() {
-  const votingHistory = [
-    {
-      proposal: "#2 Add Support for DAI Stablecoin",
-      vote: "For",
-      power: 0,
-      date: "Not Voted",
-      result: "Passed",
-    },
-    {
-      proposal: "#3 Reduce Protocol Fee from 5% to 3%",
-      vote: "Against",
-      power: 0,
-      date: "Not Voted",
-      result: "Failed",
-    },
-  ]
+  const { address } = useAccount()
+  const { data: votingPower } = useVotingPower(address as `0x${string}` | undefined)
+  const { data: proposalCount } = useProposalCount()
+  const { data: activeIds } = useActiveProposals()
+  const { data: historyData } = useUserVotingHistory(address as `0x${string}` | undefined)
+  const castVote = useCastVote()
+  const delegateWrite = useDelegate()
+  const { toast } = useToast()
 
-  const upcomingVotes = [
-    {
-      proposal: "#1 Increase Weekly Draw Frequency",
-      deadline: "3 days",
-      currentStatus: "Leading For",
-      participation: "79.5%",
-    },
-  ]
+  const [delegateTo, setDelegateTo] = useState("")
+  const isValidAddress = (v: string) => /^0x[a-fA-F0-9]{40}$/.test(v)
+
+  const handleDelegate = async (to?: string) => {
+    try {
+      // @ts-ignore
+      if (!delegateWrite?.write) throw new Error("Wallet not ready")
+      const target = (to && isValidAddress(to)) ? to : (address as `0x${string}`)
+      // @ts-ignore
+      const tx = await delegateWrite.write({ args: [target] })
+      const hash = (tx as any)?.hash || (tx as any)
+      const url = hash ? `https://explorer.sepolia.mantle.xyz/tx/${hash}` : undefined
+      toast({ title: "Delegation submitted", description: url || `Delegated to ${target}` })
+    } catch (e: any) {
+      toast({ title: "Delegation failed", description: e?.shortMessage || e?.message || String(e), variant: "destructive" })
+    }
+  }
+
+  const activeIdsArr = (activeIds as readonly bigint[] | undefined) ?? []
+  const { data: activeProposals } = useContractReads({
+    contracts: activeIdsArr.map((id) => ({
+      address: CONTRACT_ADDRESSES.SAVE_TOKEN as `0x${string}`,
+      abi: saveTokenAbi,
+      functionName: "getProposal",
+      args: [id],
+    })),
+    enabled: activeIdsArr.length > 0,
+  } as any)
+
+  // User votes for active proposals
+  const { data: activeUserVotes } = useContractReads({
+    contracts: address && activeIdsArr.length > 0 ? activeIdsArr.map((id) => ({
+      address: CONTRACT_ADDRESSES.SAVE_TOKEN as `0x${string}`,
+      abi: saveTokenAbi,
+      functionName: "getUserVote",
+      args: [id, address as `0x${string}`],
+    })) : [],
+    enabled: !!address && activeIdsArr.length > 0,
+  } as any)
+
+  const historyArr = (historyData as any[] | undefined) ?? []
+  const historyIds = Array.from(new Set(historyArr.map((r: any) => BigInt(r.proposalId))))
+  const { data: historyProposals } = useContractReads({
+    contracts: historyIds.map((id) => ({
+      address: CONTRACT_ADDRESSES.SAVE_TOKEN as `0x${string}`,
+      abi: saveTokenAbi,
+      functionName: "getProposal",
+      args: [id],
+    })),
+    enabled: historyIds.length > 0,
+  } as any)
 
   return (
     <div className="min-h-screen">
@@ -44,7 +87,7 @@ export default function VotingPage() {
           <h1 className="text-xl font-bold">Voting Dashboard</h1>
         </div>
         <Button
-          disabled
+          disabled={!votingPower || (votingPower as bigint) === BigInt(0) || activeIdsArr.length === 0}
           className="bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-700 hover:to-cyan-600 text-white border-none disabled:opacity-50"
         >
           <Vote className="mr-2 h-4 w-4" />
@@ -67,8 +110,8 @@ export default function VotingPage() {
               <CardTitle className="text-sm font-medium text-gray-400">Your Voting Power</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">0 $SAVE</div>
-              <div className="text-sm text-gray-400">0% of total supply</div>
+              <div className="text-2xl font-bold">{votingPower ? `${Number(formatUnits(votingPower as bigint, 18)).toLocaleString()} $SAVE` : '0 $SAVE'}</div>
+              <div className="text-sm text-gray-400">Voting power based on your delegated balance</div>
             </CardContent>
           </Card>
 
@@ -77,8 +120,8 @@ export default function VotingPage() {
               <CardTitle className="text-sm font-medium text-gray-400">Votes Cast</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">0</div>
-              <div className="text-sm text-gray-400">Out of 3 proposals</div>
+              <div className="text-2xl font-bold">{historyArr.length}</div>
+              <div className="text-sm text-gray-400">Out of {proposalCount ? Number(proposalCount as bigint).toLocaleString() : '—'} proposals</div>
             </CardContent>
           </Card>
 
@@ -87,8 +130,8 @@ export default function VotingPage() {
               <CardTitle className="text-sm font-medium text-gray-400">Participation Rate</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">0%</div>
-              <div className="text-sm text-gray-400">Need tokens to participate</div>
+              <div className="text-2xl font-bold">{proposalCount && Number(proposalCount as bigint) > 0 ? `${((historyArr.length / Number(proposalCount as bigint)) * 100).toFixed(1)}%` : '0%'}</div>
+              <div className="text-sm text-gray-400">Based on total proposals</div>
             </CardContent>
           </Card>
 
@@ -97,8 +140,25 @@ export default function VotingPage() {
               <CardTitle className="text-sm font-medium text-gray-400">Delegation Status</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">None</div>
-              <div className="text-sm text-gray-400">Self-voting</div>
+              <div className="text-2xl font-bold">Set Delegation</div>
+              <div className="text-sm text-gray-400 mb-3">Delegate your votes to yourself or another address</div>
+              <div className="flex gap-2 mb-2">
+                <Button
+                  variant="outline"
+                  disabled={!address}
+                  onClick={() => handleDelegate()}
+                >
+                  Self-Delegate
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!address || !isValidAddress(delegateTo)}
+                  onClick={() => handleDelegate(delegateTo)}
+                >
+                  Delegate
+                </Button>
+              </div>
+              <Input placeholder="Delegatee 0x..." value={delegateTo} onChange={(e) => setDelegateTo(e.target.value)} />
             </CardContent>
           </Card>
         </div>
@@ -113,36 +173,61 @@ export default function VotingPage() {
               <CardDescription>Active proposals requiring your vote</CardDescription>
             </CardHeader>
             <CardContent>
-              {upcomingVotes.map((vote, index) => (
-                <div key={index} className="p-4 rounded-lg bg-white/5 mb-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-medium">{vote.proposal}</h4>
-                    <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">{vote.deadline} left</Badge>
+              {activeProposals && (activeProposals as any[]).length > 0 ? (activeProposals as any[]).map((res: any, idx: number) => {
+                const p = res?.result as any
+                if (!p) return null
+                const now = Math.floor(Date.now()/1000)
+                const end = Number(p.endTime)
+                const timeLeftSec = Math.max(0, end - now)
+                const totalVotes = Number(p.forVotes) + Number(p.againstVotes)
+                const participation = totalVotes // no supply denominator available here
+                return (
+                  <div key={String(p.id)} className="p-4 rounded-lg bg-white/5 mb-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="font-medium">#{String(p.id)} {p.title}</h4>
+                      <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">{timeLeftSec > 0 ? `${Math.floor(timeLeftSec/86400)}d ${Math.floor((timeLeftSec%86400)/3600)}h left` : 'Ended'}</Badge>
+                    </div>
+                    <div className="flex justify-between text-sm text-gray-400 mb-3">
+                      <span>Status: {Number(p.forVotes) >= Number(p.againstVotes) ? 'Leading For' : 'Leading Against'}</span>
+                      <span>Participation: {participation.toLocaleString()} votes</span>
+                    </div>
+                    {activeUserVotes && address && (() => {
+                      const idx = activeIdsArr.findIndex((id) => String(id) === String(p.id))
+                      const uv = (activeUserVotes as any[])[idx]?.result
+                      if (!uv || !uv.hasVoted) return null
+                      return (
+                        <div className="mb-3">
+                          <Badge variant="outline" className="border-purple-500/30 text-gray-300">
+                            You voted {uv.support ? 'For' : 'Against'} ({Number(uv.votes).toLocaleString()} votes)
+                          </Badge>
+                        </div>
+                      )
+                    })()}
+                    <div className="flex gap-2">
+                      <Button
+                        disabled={!votingPower || (votingPower as bigint) === BigInt(0)}
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 border-green-500/20 hover:bg-green-500/10 bg-transparent disabled:opacity-50"
+                        onClick={() => handleVote(p.id as bigint, true)}
+                      >
+                        Vote For
+                      </Button>
+                      <Button
+                        disabled={!votingPower || (votingPower as bigint) === BigInt(0)}
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 border-red-500/20 hover:bg-red-500/10 bg-transparent disabled:opacity-50"
+                        onClick={() => handleVote(p.id as bigint, false)}
+                      >
+                        Vote Against
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-sm text-gray-400 mb-3">
-                    <span>Status: {vote.currentStatus}</span>
-                    <span>Participation: {vote.participation}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      disabled
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 border-green-500/20 hover:bg-green-500/10 bg-transparent disabled:opacity-50"
-                    >
-                      Vote For
-                    </Button>
-                    <Button
-                      disabled
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 border-red-500/20 hover:bg-red-500/10 bg-transparent disabled:opacity-50"
-                    >
-                      Vote Against
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                )
+              }) : (
+                <div className="p-4 rounded-lg bg-white/5 mb-4 text-sm text-gray-400">No active proposals</div>
+              )}
             </CardContent>
           </Card>
 
@@ -165,27 +250,38 @@ export default function VotingPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {votingHistory.map((vote, index) => (
-                      <TableRow key={index} className="hover:bg-white/5">
-                        <TableCell className="font-medium">{vote.proposal}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-gray-400">
-                            {vote.date}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={
-                              vote.result === "Passed"
-                                ? "bg-green-500/20 text-green-400 border-green-500/30"
-                                : "bg-red-500/20 text-red-400 border-red-500/30"
-                            }
-                          >
-                            {vote.result}
-                          </Badge>
-                        </TableCell>
+                    {historyArr.length > 0 ? historyArr.map((rec: any, index: number) => {
+                      const id = BigInt(rec.proposalId)
+                      const propIdx = historyIds.findIndex((x) => x === id)
+                      const prop = historyProposals && (historyProposals as any[])[propIdx]?.result
+                      const title = prop ? `#${String(prop.id)} ${prop.title}` : `#${String(id)}`
+                      const result = prop ? (Number(prop.forVotes) >= Number(prop.againstVotes) ? 'Passed' : 'Failed') : '—'
+                      return (
+                        <TableRow key={`${String(id)}-${index}`} className="hover:bg-white/5">
+                          <TableCell className="font-medium">{title}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-gray-400">
+                              {rec.support ? 'For' : 'Against'} ({Number(rec.votes).toLocaleString()} votes)
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={
+                                result === 'Passed'
+                                  ? "bg-green-500/20 text-green-400 border-green-500/30"
+                                  : "bg-red-500/20 text-red-400 border-red-500/30"
+                              }
+                            >
+                              {result}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    }) : (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-sm text-gray-400">No voting history</TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
               </div>

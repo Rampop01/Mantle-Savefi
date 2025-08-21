@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { ArrowUpRight, Calendar, Search, Trophy, Filter, Download } from "lucide-react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -9,6 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useContractRead } from "wagmi"
+import { CONTRACT_ADDRESSES } from "@/config/web3"
+import { abi as vaultAbi } from "@/hooks/abi/SaveFiVault"
+import { formatUnits } from "viem"
 import {
   Pagination,
   PaginationContent,
@@ -19,52 +23,88 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 
-// Sample data for draw history
-const drawHistory = [
-  {
-    id: 42,
-    date: "Jul 23, 2025",
-    winner: "0x7a...3f91",
-    prize: "150.25 USDC",
-    participants: 1245,
-    tvl: "24,750.00 USDC",
-  },
-  {
-    id: 41,
-    date: "Jul 16, 2025",
-    winner: "0x3b...8e72",
-    prize: "142.18 USDC",
-    participants: 1198,
-    tvl: "23,890.00 USDC",
-  },
-  {
-    id: 40,
-    date: "Jul 09, 2025",
-    winner: "0x5f...2d45",
-    prize: "138.92 USDC",
-    participants: 1156,
-    tvl: "23,150.00 USDC",
-  },
-  {
-    id: 39,
-    date: "Jul 02, 2025",
-    winner: "0x9c...7a31",
-    prize: "135.45 USDC",
-    participants: 1102,
-    tvl: "22,575.00 USDC",
-  },
-  {
-    id: 38,
-    date: "Jun 25, 2025",
-    winner: "0x2d...4e67",
-    prize: "130.80 USDC",
-    participants: 1078,
-    tvl: "21,800.00 USDC",
-  },
-]
+function formatDuration(ms: number) {
+  if (ms <= 0) return "Now"
+  const s = Math.floor(ms / 1000)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
 
 export default function HistoryPage() {
   const [searchQuery, setSearchQuery] = useState("")
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const [featuredN, setFeaturedN] = useState<number>(5)
+
+  const offset = useMemo(() => BigInt((page - 1) * pageSize), [page])
+  const limit = useMemo(() => BigInt(pageSize), [])
+
+  const { data: drawsData, isLoading, isError } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: "getDrawHistory",
+    args: [offset, limit],
+  } as any)
+
+  const { data: nextDrawTime } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: "getNextDrawTime",
+  } as any)
+
+  // Compute from the most recent N draws (user selectable: 3 or 5)
+  const LAST_N_FEATURED = useMemo(() => BigInt(featuredN), [featuredN])
+  const { data: currentDrawId } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: "getCurrentDrawId",
+  } as any)
+
+  const featuredOffset = useMemo(() => {
+    const id = (currentDrawId as bigint | undefined) ?? 0n
+    if (id <= 0n) return 0n
+    return id >= (LAST_N_FEATURED - 1n) ? id - (LAST_N_FEATURED - 1n) : 0n
+  }, [currentDrawId, LAST_N_FEATURED])
+  const featuredLimit = useMemo(() => {
+    const id = (currentDrawId as bigint | undefined) ?? 0n
+    if (id <= 0n) return 0n
+    const count = id - featuredOffset + 1n
+    return count > LAST_N_FEATURED ? LAST_N_FEATURED : count
+  }, [currentDrawId, featuredOffset, LAST_N_FEATURED])
+
+  const { data: featuredWindow, isLoading: featuredLoading, isError: featuredError } = useContractRead({
+    address: CONTRACT_ADDRESSES.SAVE_FI_VAULT as `0x${string}`,
+    abi: vaultAbi,
+    functionName: "getDrawHistory",
+    args: [featuredOffset, featuredLimit],
+    query: { enabled: (featuredLimit as unknown as bigint) !== 0n },
+  } as any)
+
+  const draws = (drawsData as any[] | undefined) ?? []
+  const now = Date.now()
+  const nextTsMs = nextDrawTime ? Number(nextDrawTime as bigint) * 1000 : 0
+  const nextIn = formatDuration(nextTsMs - now)
+
+  const filtered = useMemo(() => {
+    if (!searchQuery) return draws
+    const q = searchQuery.toLowerCase()
+    return (draws as any[]).filter((d: any) =>
+      String(d.id).includes(q) || (d.winner as string)?.toLowerCase().includes(q),
+    )
+  }, [draws, searchQuery])
+
+  const fmt6 = (v?: bigint) => (v ? Number(formatUnits(v, 6)).toLocaleString() : "—")
+  const fmtTs = (v?: bigint) => (v ? new Date(Number(v) * 1000).toLocaleString() : "—")
+
+  const featuredDraw = useMemo(() => {
+    const arr = (featuredWindow as any[] | undefined) ?? []
+    if (!arr.length) return undefined
+    return arr.reduce((max: any, cur: any) => (max && max.prizeAmount > cur.prizeAmount ? max : cur), arr[0])
+  }, [featuredWindow])
 
   return (
     <div className="min-h-screen">
@@ -76,7 +116,7 @@ export default function HistoryPage() {
         </div>
         <Button className="bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-700 hover:to-cyan-600 text-white border-none">
           <Calendar className="mr-2 h-4 w-4" />
-          Next Draw: 2d 14h
+          Next Draw: {nextIn}
         </Button>
       </header>
 
@@ -136,14 +176,29 @@ export default function HistoryPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {drawHistory.map((draw) => (
-                    <TableRow key={draw.id} className="hover:bg-white/5">
-                      <TableCell className="font-medium">{draw.id}</TableCell>
-                      <TableCell>{draw.date}</TableCell>
-                      <TableCell className="font-mono">{draw.winner}</TableCell>
-                      <TableCell className="font-medium text-cyan-400">{draw.prize}</TableCell>
-                      <TableCell className="hidden md:table-cell">{draw.participants}</TableCell>
-                      <TableCell className="hidden md:table-cell">{draw.tvl}</TableCell>
+                  {isLoading && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-gray-400">Loading…</TableCell>
+                    </TableRow>
+                  )}
+                  {isError && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-red-400">Failed to load draw history</TableCell>
+                    </TableRow>
+                  )}
+                  {!isLoading && !isError && filtered.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-gray-400">No draws found</TableCell>
+                    </TableRow>
+                  )}
+                  {!isLoading && !isError && filtered.length > 0 && (filtered as any[]).map((d: any) => (
+                    <TableRow key={String(d.id)} className="hover:bg-white/5">
+                      <TableCell className="font-medium">{String(d.id)}</TableCell>
+                      <TableCell>{fmtTs(d.timestamp)}</TableCell>
+                      <TableCell className="font-mono">{(d.winner as string)?.slice(0,6)}...{(d.winner as string)?.slice(-4)}</TableCell>
+                      <TableCell className="font-medium text-cyan-400">{fmt6(d.prizeAmount)} USDC</TableCell>
+                      <TableCell className="hidden md:table-cell">{Number(d.participantCount).toLocaleString()}</TableCell>
+                      <TableCell className="hidden md:table-cell">{fmt6(d.totalValueLocked)} USDC</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                           <ArrowUpRight className="h-4 w-4" />
@@ -160,24 +215,15 @@ export default function HistoryPage() {
               <Pagination>
                 <PaginationContent>
                   <PaginationItem>
-                    <PaginationPrevious href="#" />
+                    <PaginationPrevious href="#" onClick={(e)=>{e.preventDefault(); setPage((p)=>Math.max(1,p-1))}} />
                   </PaginationItem>
                   <PaginationItem>
                     <PaginationLink href="#" isActive>
-                      1
+                      {page}
                     </PaginationLink>
                   </PaginationItem>
                   <PaginationItem>
-                    <PaginationLink href="#">2</PaginationLink>
-                  </PaginationItem>
-                  <PaginationItem>
-                    <PaginationLink href="#">3</PaginationLink>
-                  </PaginationItem>
-                  <PaginationItem>
-                    <PaginationEllipsis />
-                  </PaginationItem>
-                  <PaginationItem>
-                    <PaginationNext href="#" />
+                    <PaginationNext href="#" onClick={(e)=>{e.preventDefault(); setPage((p)=>p+1)}} />
                   </PaginationItem>
                 </PaginationContent>
               </Pagination>
@@ -222,19 +268,42 @@ export default function HistoryPage() {
 
               <div className="flex-1 text-center md:text-left">
                 <h3 className="text-2xl font-bold mb-2">Biggest Prize So Far</h3>
-                <p className="text-gray-300 mb-4">Draw #36 on June 11, 2025 had our largest prize pool to date!</p>
+                <div className="mb-3 flex items-center gap-2 justify-center md:justify-start">
+                  <span className="text-xs text-gray-400">Based on last</span>
+                  <Select value={String(featuredN)} onValueChange={(v)=>setFeaturedN(Number(v))}>
+                    <SelectTrigger className="w-[90px] h-8 bg-white/10 border-purple-500/20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">3 draws</SelectItem>
+                      <SelectItem value="5">5 draws</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {featuredLoading && (
+                  <p className="text-gray-300 mb-4">Loading largest prize…</p>
+                )}
+                {featuredError && (
+                  <p className="text-red-400 mb-4">Failed to load largest prize</p>
+                )}
+                {!featuredLoading && !featuredError && !featuredDraw && (
+                  <p className="text-gray-300 mb-4">No draws yet</p>
+                )}
+                {!featuredLoading && !featuredError && featuredDraw && (
+                  <p className="text-gray-300 mb-4">Draw #{String(featuredDraw.id)} on {fmtTs(featuredDraw.timestamp)} had our largest prize pool to date!</p>
+                )}
                 <div className="flex flex-col md:flex-row gap-4 md:items-center">
                   <div className="bg-white/10 rounded-lg p-3">
                     <div className="text-sm text-gray-400">Winner</div>
-                    <div className="font-mono">0x8f...2c59</div>
+                    <div className="font-mono">{featuredDraw ? `${(featuredDraw.winner as string)?.slice(0,6)}...${(featuredDraw.winner as string)?.slice(-4)}` : "—"}</div>
                   </div>
                   <div className="bg-white/10 rounded-lg p-3">
                     <div className="text-sm text-gray-400">Prize Amount</div>
-                    <div className="text-xl font-bold text-cyan-400">175.32 USDC</div>
+                    <div className="text-xl font-bold text-cyan-400">{featuredDraw ? `${fmt6(featuredDraw.prizeAmount)} USDC` : "—"}</div>
                   </div>
                   <div className="bg-white/10 rounded-lg p-3">
                     <div className="text-sm text-gray-400">TVL at Draw</div>
-                    <div>20,950.00 USDC</div>
+                    <div>{featuredDraw ? `${fmt6(featuredDraw.totalValueLocked)} USDC` : "—"}</div>
                   </div>
                 </div>
               </div>
