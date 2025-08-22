@@ -24,13 +24,13 @@ SaveFi is a gamified, no-loss savings protocol built on the Mantle network. User
 - **Chain ID**: 5000
 - **RPC URL**: https://rpc.mantle.xyz
 - **Currency**: MNT
-- **Explorer**: https://explorer.mantle.xyz
+- **Explorer**: https://mantlescan.xyz/
 
 ### Mantle Testnet  
-- **Chain ID**: 5001
+- **Chain ID**: 5003
 - **RPC URL**: https://rpc.sepolia.mantle.xyz
 - **Currency**: MNT
-- **Explorer**: https://explorer.testnet.mantle.xyz
+- **Explorer**: https://sepolia.mantlescan.xyz/
 
 ## Installation
 
